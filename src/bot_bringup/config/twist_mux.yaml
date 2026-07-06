@@ -1,0 +1,20 @@
+twist_mux:
+  ros__parameters:
+    # Higher priority wins while its topic is fresh. A human on the phone or
+    # a joystick always overrides autonomous navigation.
+    topics:
+      # Nav2's velocity smoother publishes its final output on /cmd_vel
+      # (nav2_bringup default); the mux consumes it and feeds the base on
+      # /cmd_vel_base.
+      navigation:
+        topic: cmd_vel
+        timeout: 0.5
+        priority: 10
+      joystick:
+        topic: cmd_vel_teleop
+        timeout: 0.5
+        priority: 90
+      mobile:
+        topic: cmd_vel_mobile
+        timeout: 0.5
+        priority: 100
