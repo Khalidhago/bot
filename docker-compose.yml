@@ -1,0 +1,11 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    network_mode: host   # DDS discovery + phone access to ports 8080/9090
+    restart: unless-stopped
+    # For real hardware, uncomment and set use_mock_hardware:=false:
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0
+    # command: ros2 launch bot_bringup robot.launch.py use_mock_hardware:=false
