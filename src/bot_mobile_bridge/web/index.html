@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>bot — drive</title>
+<style>
+  :root {
+    --bg: #101418; --panel: #1a2027; --fg: #e6edf3;
+    --accent: #2f81f7; --ok: #3fb950; --bad: #f85149;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; touch-action: none; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: system-ui, -apple-system, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0.7rem 1rem; background: var(--panel);
+  }
+  header h1 { font-size: 1rem; font-weight: 600; }
+  #status { font-size: 0.8rem; }
+  #status::before {
+    content: '●'; margin-right: 0.35rem; color: var(--bad);
+  }
+  #status.connected::before { color: var(--ok); }
+  #telemetry {
+    display: flex; gap: 1.5rem; justify-content: center;
+    padding: 0.5rem; font-variant-numeric: tabular-nums;
+    font-size: 0.85rem; color: #9da7b3;
+  }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; }
+  #joystick { touch-action: none; }
+  footer { padding: 0.8rem 1rem 1.4rem; display: flex; gap: 0.8rem; }
+  button {
+    flex: 1; padding: 0.9rem; border: 0; border-radius: 0.6rem;
+    font-size: 1rem; font-weight: 700; color: #fff; cursor: pointer;
+  }
+  #estop { background: var(--bad); }
+  #estop.engaged { background: #7d2620; outline: 2px solid var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>bot</h1>
+  <span id="status">connecting…</span>
+</header>
+
+<div id="telemetry">
+  <span>v <b id="lin">0.00</b> m/s</span>
+  <span>ω <b id="ang">0.00</b> rad/s</span>
+</div>
+
+<div id="stage"><canvas id="joystick"></canvas></div>
+
+<footer>
+  <button id="estop">STOP</button>
+</footer>
+
+<script>
+'use strict';
+
+// ---- configuration -------------------------------------------------------
+const MAX_LINEAR  = 0.6;   // m/s   (matches bot_base max_linear_speed)
+const MAX_ANGULAR = 2.0;   // rad/s
+const CMD_TOPIC   = '/cmd_vel_mobile';
+const PUBLISH_HZ  = 10;
+const ROSBRIDGE_URL = `ws://${location.hostname}:9090`;
+
+// ---- rosbridge connection (raw protocol, no external libraries) ----------
+let ws = null;
+let connected = false;
+const statusEl = document.getElementById('status');
+
+function connect() {
+  ws = new WebSocket(ROSBRIDGE_URL);
+  ws.onopen = () => {
+    connected = true;
+    statusEl.textContent = 'connected';
+    statusEl.classList.add('connected');
+    send({op: 'advertise', topic: CMD_TOPIC, type: 'geometry_msgs/msg/Twist'});
+    send({op: 'subscribe', topic: '/odom', type: 'nav_msgs/msg/Odometry',
+          throttle_rate: 200, queue_length: 1});
+  };
+  ws.onclose = () => {
+    connected = false;
+    statusEl.textContent = 'reconnecting…';
+    statusEl.classList.remove('connected');
+    setTimeout(connect, 1000);
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.op === 'publish' && m.topic === '/odom') {
+      document.getElementById('lin').textContent =
+        m.msg.twist.twist.linear.x.toFixed(2);
+      document.getElementById('ang').textContent =
+        m.msg.twist.twist.angular.z.toFixed(2);
+    }
+  };
+}
+
+function send(obj) {
+  if (connected && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  }
+}
+
+// ---- joystick ------------------------------------------------------------
+const canvas = document.getElementById('joystick');
+const ctx = canvas.getContext('2d');
+let radius, knobRadius;
+let knob = {x: 0, y: 0};      // normalized [-1, 1], y up
+let activePointer = null;
+let estopped = false;
+
+function resize() {
+  const stage = document.getElementById('stage');
+  const size = Math.min(stage.clientWidth, stage.clientHeight) * 0.85;
+  canvas.width = canvas.height = size * devicePixelRatio;
+  canvas.style.width = canvas.style.height = size + 'px';
+  radius = size * devicePixelRatio * 0.42;
+  knobRadius = radius * 0.35;
+  draw();
+}
+
+function draw() {
+  const c = canvas.width / 2;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.lineWidth = 3 * devicePixelRatio;
+  ctx.strokeStyle = '#2b333c';
+  ctx.beginPath(); ctx.arc(c, c, radius, 0, 2 * Math.PI); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(c - radius, c); ctx.lineTo(c + radius, c);
+  ctx.moveTo(c, c - radius); ctx.lineTo(c, c + radius);
+  ctx.stroke();
+  ctx.fillStyle = estopped ? '#f85149' : '#2f81f7';
+  ctx.beginPath();
+  ctx.arc(c + knob.x * radius, c - knob.y * radius, knobRadius, 0, 2 * Math.PI);
+  ctx.fill();
+}
+
+function setKnobFromEvent(ev) {
+  const rect = canvas.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  let x = (ev.clientX - cx) / (rect.width * 0.42);
+  let y = -(ev.clientY - cy) / (rect.height * 0.42);
+  const mag = Math.hypot(x, y);
+  if (mag > 1) { x /= mag; y /= mag; }
+  knob = {x, y};
+  draw();
+}
+
+canvas.addEventListener('pointerdown', (ev) => {
+  activePointer = ev.pointerId;
+  canvas.setPointerCapture(ev.pointerId);
+  setKnobFromEvent(ev);
+});
+canvas.addEventListener('pointermove', (ev) => {
+  if (ev.pointerId === activePointer) setKnobFromEvent(ev);
+});
+function release(ev) {
+  if (ev.pointerId === activePointer) {
+    activePointer = null;
+    knob = {x: 0, y: 0};
+    draw();
+    zeroBurst = 5;    // send a few zeros so the robot stops crisply
+  }
+}
+canvas.addEventListener('pointerup', release);
+canvas.addEventListener('pointercancel', release);
+
+// ---- e-stop ----------------------------------------------------------------
+const estopBtn = document.getElementById('estop');
+estopBtn.addEventListener('click', () => {
+  estopped = !estopped;
+  estopBtn.classList.toggle('engaged', estopped);
+  estopBtn.textContent = estopped ? 'RELEASE' : 'STOP';
+  knob = {x: 0, y: 0};
+  draw();
+  zeroBurst = 5;
+});
+
+// ---- publisher loop --------------------------------------------------------
+// Publish only while the joystick is engaged (plus a short burst of zeros on
+// release). Idle silence lets the twist mux fall through to lower-priority
+// sources like Nav2; the base's own cmd_vel deadman covers a dropped link.
+let zeroBurst = 0;
+
+function publishTwist() {
+  const linear = estopped ? 0 : knob.y * MAX_LINEAR;
+  const angular = estopped ? 0 : -knob.x * MAX_ANGULAR;
+  send({op: 'publish', topic: CMD_TOPIC, msg: {
+    linear: {x: linear, y: 0, z: 0},
+    angular: {x: 0, y: 0, z: angular},
+  }});
+}
+
+setInterval(() => {
+  if (estopped || activePointer !== null) {
+    // While e-stopped, keep streaming zeros: the mux's highest-priority
+    // input stays fresh, so nothing else (e.g. Nav2) can move the robot.
+    publishTwist();
+  } else if (zeroBurst > 0) {
+    zeroBurst -= 1;
+    publishTwist();
+  }
+}, 1000 / PUBLISH_HZ);
+
+window.addEventListener('resize', resize);
+resize();
+connect();
+</script>
+</body>
+</html>
