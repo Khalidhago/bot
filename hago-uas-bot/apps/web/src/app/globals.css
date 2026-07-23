@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 220 30% 6%;
+  --foreground: 210 30% 85%;
+  --card: 220 30% 9%;
+  --card-foreground: 210 30% 85%;
+  --primary: 210 100% 40%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 25% 15%;
+  --secondary-foreground: 210 30% 85%;
+  --muted: 220 25% 12%;
+  --muted-foreground: 210 20% 55%;
+  --accent: 195 100% 50%;
+  --accent-foreground: 220 30% 6%;
+  --border: 220 25% 18%;
+  --input: 220 25% 15%;
+  --ring: 210 100% 40%;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0e1a;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2d4a;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #0066cc;
+}
+
+/* Code blocks */
+pre {
+  @apply rounded-lg text-sm overflow-x-auto;
+}
+
+/* Mermaid diagrams */
+.mermaid {
+  @apply flex justify-center my-4;
+}
