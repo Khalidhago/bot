@@ -38,13 +38,23 @@ async def retrieve(
     query_embeddings = await generate_embeddings([query])
     query_vector = query_embeddings[0]
 
-    # pgvector cosine similarity — requires the vector column
-    vector_literal = f"[{','.join(str(v) for v in query_vector)}]"
+    # Build the vector string — values come from the embedding API response
+    # (floats only) and are never derived from raw user input.
+    vector_str = f"[{','.join(f'{v:.8f}' for v in query_vector)}]"
 
-    doc_filter = ""
+    # Build document_id filter using a safe parameterised approach:
+    # convert UUIDs to validated strings, then pass as a bound parameter list.
+    params: dict = {"top_k": k, "query_vector": vector_str}
+
     if document_ids:
-        ids_str = ",".join(f"'{str(d)}'" for d in document_ids)
-        doc_filter = f"AND dc.document_id IN ({ids_str})"
+        # Validate each ID to UUID type before using — prevents injection
+        validated_ids = [str(uuid.UUID(str(d))) for d in document_ids]
+        id_placeholders = ", ".join(f":doc_id_{i}" for i in range(len(validated_ids)))
+        doc_filter = f"AND dc.document_id IN ({id_placeholders})"
+        for i, vid in enumerate(validated_ids):
+            params[f"doc_id_{i}"] = vid
+    else:
+        doc_filter = ""
 
     sql = text(
         f"""
@@ -65,9 +75,7 @@ async def retrieve(
     )
 
     try:
-        result = await session.execute(
-            sql, {"query_vector": vector_literal, "top_k": k}
-        )
+        result = await session.execute(sql, params)
         rows = result.fetchall()
         return [
             RetrievedChunk(
